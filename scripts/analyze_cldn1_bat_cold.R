@@ -9,11 +9,12 @@ suppressPackageStartupMessages({
   library(ggplot2)
 })
 
-read_tabular <- function(path) {
+read_tabular <- function(path, has_header = TRUE) {
   readr::read_delim(
     file = path,
     delim = NULL,
     comment = "#",
+    col_names = has_header,
     show_col_types = FALSE,
     progress = FALSE,
     col_types = cols(.default = col_character())
@@ -24,6 +25,10 @@ ensure_output_dirs <- function(out_dir) {
   dir.create(file.path(out_dir, "plots"), recursive = TRUE, showWarnings = FALSE)
   dir.create(file.path(out_dir, "csv"), recursive = TRUE, showWarnings = FALSE)
   dir.create(file.path(out_dir, "logs"), recursive = TRUE, showWarnings = FALSE)
+}
+
+safe_upper <- function(x) {
+  ifelse(is.na(x), NA_character_, str_to_upper(x))
 }
 
 find_expression_sample_columns <- function(df) {
@@ -40,7 +45,7 @@ find_probe_id_column <- function(df, sample_cols) {
 
 find_gene_symbol_column <- function(df) {
   cols <- colnames(df)
-  idx <- str_which(str_to_lower(cols), "gene symbol|symbol|hgnc")
+  idx <- str_which(str_to_lower(cols), "gene symbol|gene_symbol|symbol|hgnc")
   if (length(idx) > 0) cols[[idx[[1]]]] else NA_character_
 }
 
@@ -75,36 +80,129 @@ infer_groups <- function(sdrf, sample_col) {
   )
 }
 
+metadata_sanity_checks <- function(sdrf, idf = NULL, out_dir = "results/cldn1_bat_cold", log_lines = character()) {
+  log_lines <- c(
+    log_lines,
+    "=== Metadata sanity checks ===",
+    sprintf("SDRF shape: (%d, %d)", nrow(sdrf), ncol(sdrf)),
+    sprintf("SDRF columns: %s", paste(colnames(sdrf), collapse = ", "))
+  )
+
+  sdrf_col_summary <- tibble(
+    column_name = colnames(sdrf),
+    non_missing_n = sapply(sdrf, function(x) sum(!is.na(x) & x != "")),
+    unique_n = sapply(sdrf, function(x) n_distinct(x[!is.na(x) & x != ""])),
+    first_examples = sapply(
+      sdrf,
+      function(x) paste(head(unique(x[!is.na(x) & x != ""]), 5), collapse = " | ")
+    )
+  )
+  write_csv(sdrf_col_summary, file.path(out_dir, "csv", "sdrf_column_summary.csv"))
+
+  tissue_cols <- colnames(sdrf)[str_detect(str_to_lower(colnames(sdrf)), "tissue|source|characteristics")]
+  temp_cols <- colnames(sdrf)[str_detect(str_to_lower(colnames(sdrf)), "cold|temperature|condition|treatment|factor")]
+
+  if (length(tissue_cols) > 0) {
+    tissue_preview <- sdrf |>
+      select(all_of(tissue_cols)) |>
+      distinct() |>
+      head(30)
+    write_csv(tissue_preview, file.path(out_dir, "csv", "sdrf_tissue_related_preview.csv"))
+  }
+
+  if (length(temp_cols) > 0) {
+    temp_preview <- sdrf |>
+      select(all_of(temp_cols)) |>
+      distinct() |>
+      head(30)
+    write_csv(temp_preview, file.path(out_dir, "csv", "sdrf_temperature_related_preview.csv"))
+  }
+
+  file_cols <- colnames(sdrf)[str_detect(str_to_lower(colnames(sdrf)), "file")]
+  if (length(file_cols) > 0) {
+    sdrf_files <- sdrf |>
+      select(all_of(file_cols)) |>
+      pivot_longer(cols = everything(), names_to = "source_col", values_to = "file_name") |>
+      filter(!is.na(file_name), file_name != "") |>
+      distinct(file_name)
+    write_csv(sdrf_files, file.path(out_dir, "csv", "sdrf_file_references.csv"))
+    log_lines <- c(log_lines, sprintf("Detected %d unique file references in SDRF.", nrow(sdrf_files)))
+  }
+
+  if (!is.null(idf)) {
+    log_lines <- c(log_lines, sprintf("IDF shape: (%d, %d)", nrow(idf), ncol(idf)))
+
+    idf_long <- idf |>
+      rename(idf_field = 1) |>
+      pivot_longer(cols = -idf_field, names_to = "value_col", values_to = "value") |>
+      filter(!is.na(value), value != "")
+
+    file_like <- idf_long |>
+      filter(str_detect(value, "\\.(txt|tsv|csv|zip|gz|cel|idat)$")) |>
+      distinct(idf_field, value)
+
+    write_csv(file_like, file.path(out_dir, "csv", "idf_file_references.csv"))
+    log_lines <- c(log_lines, sprintf("Detected %d file-like references in IDF.", nrow(file_like)))
+  }
+
+  list(log_lines = log_lines)
+}
+
 option_list <- list(
-  make_option("--expression", type = "character", help = "Path to processed expression matrix (txt/tsv)."),
-  make_option("--sdrf", type = "character", help = "Path to SDRF sample annotation file."),
+  make_option("--expression", type = "character", default = NULL,
+              help = "Path to processed expression matrix (txt/tsv)."),
+  make_option("--sdrf", type = "character", default = NULL,
+              help = "Path to SDRF sample annotation file."),
+  make_option("--idf", type = "character", default = NULL,
+              help = "Optional IDF file path (recommended for metadata sanity checks)."),
   make_option("--sample-map", type = "character", default = NULL,
               help = "Optional CSV/TSV with columns: sample_id,tissue_group,temperature_group."),
   make_option("--platform-annotation", type = "character", default = NULL,
               help = "Optional annotation file with columns probe_id and gene_symbol."),
+  make_option("--metadata-only", action = "store_true", default = FALSE,
+              help = "Run metadata sanity checks only (no expression analysis)."),
   make_option("--out-dir", type = "character", default = "results/cldn1_bat_cold",
               help = "Output folder [default %default].")
 )
 
 opt <- parse_args(OptionParser(option_list = option_list))
 
-if (is.null(opt$expression) || is.null(opt$sdrf)) {
-  stop("--expression and --sdrf are required.")
+if (is.null(opt$sdrf)) {
+  stop("--sdrf is required.")
 }
 
 out_dir <- opt$out_dir
 ensure_output_dirs(out_dir)
 
-log_lines <- c("=== CLDN1 BAT cold analysis: sanity checks ===")
+log_lines <- c("=== CLDN1 BAT cold analysis ===")
+
+sdrf <- read_tabular(opt$sdrf)
+idf <- NULL
+if (!is.null(opt$idf)) {
+  idf <- read_tabular(opt$idf, has_header = FALSE)
+}
+
+meta_result <- metadata_sanity_checks(sdrf = sdrf, idf = idf, out_dir = out_dir, log_lines = log_lines)
+log_lines <- meta_result$log_lines
+
+if (isTRUE(opt$`metadata-only`) || is.null(opt$expression)) {
+  log_lines <- c(
+    log_lines,
+    "Metadata-only mode: expression analysis skipped.",
+    "Next step: download processed expression matrix and rerun with --expression."
+  )
+  writeLines(log_lines, file.path(out_dir, "logs", "run_summary.txt"))
+  cat("Metadata checks complete. See:", file.path(out_dir, "logs", "run_summary.txt"), "\n")
+  quit(save = "no", status = 0)
+}
 
 expr <- read_tabular(opt$expression)
-sdrf <- read_tabular(opt$sdrf)
-
-log_lines <- c(log_lines,
-               sprintf("Expression matrix shape: (%d, %d)", nrow(expr), ncol(expr)),
-               sprintf("SDRF shape: (%d, %d)", nrow(sdrf), ncol(sdrf)),
-               sprintf("Expression columns (first 12): %s", paste(head(colnames(expr), 12), collapse = ", ")),
-               sprintf("SDRF columns: %s", paste(colnames(sdrf), collapse = ", ")))
+log_lines <- c(
+  log_lines,
+  "=== Expression sanity checks ===",
+  sprintf("Expression matrix shape: (%d, %d)", nrow(expr), ncol(expr)),
+  sprintf("Expression columns (first 15): %s", paste(head(colnames(expr), 15), collapse = ", "))
+)
 
 sample_cols <- find_expression_sample_columns(expr)
 if (length(sample_cols) < 2) {
@@ -114,16 +212,20 @@ if (length(sample_cols) < 2) {
 probe_col <- find_probe_id_column(expr, sample_cols)
 symbol_col <- find_gene_symbol_column(expr)
 
-log_lines <- c(log_lines,
-               sprintf("Detected expression sample columns: %d", length(sample_cols)),
-               sprintf("Detected probe ID column: %s", probe_col),
-               sprintf("Detected gene symbol column: %s", symbol_col))
+log_lines <- c(
+  log_lines,
+  sprintf("Detected expression sample columns: %d", length(sample_cols)),
+  sprintf("Detected probe ID column: %s", probe_col),
+  sprintf("Detected gene symbol column: %s", symbol_col)
+)
 
 sdrf_sample_col <- find_best_sdrf_sample_column(sdrf, sample_cols)
-if (is.na(sdrf_sample_col)) {
+if (is.na(sdrf_sample_col) && is.null(opt$`sample-map`)) {
   stop("No SDRF column overlaps expression sample names. Provide --sample-map.")
 }
-log_lines <- c(log_lines, sprintf("Detected SDRF sample ID column: %s", sdrf_sample_col))
+if (!is.na(sdrf_sample_col)) {
+  log_lines <- c(log_lines, sprintf("Detected SDRF sample ID column: %s", sdrf_sample_col))
+}
 
 if (!is.null(opt$`sample-map`)) {
   sample_map <- read_tabular(opt$`sample-map`)
@@ -144,13 +246,16 @@ map_clean <- sample_map |>
   filter(sample_id %in% sample_cols) |>
   distinct(sample_id, .keep_all = TRUE)
 
-overlap <- nrow(map_clean)
-log_lines <- c(log_lines,
-               sprintf("Sample map vs expression overlap: %d samples", overlap),
-               sprintf("Counts by tissue_group: %s",
-                       paste(capture.output(print(table(map_clean$tissue_group, useNA = "ifany"))), collapse = " ")),
-               sprintf("Counts by temperature_group: %s",
-                       paste(capture.output(print(table(map_clean$temperature_group, useNA = "ifany"))), collapse = " ")))
+if (nrow(map_clean) == 0) {
+  stop("No overlapping samples between sample map and expression columns.")
+}
+
+log_lines <- c(
+  log_lines,
+  sprintf("Sample map vs expression overlap: %d samples", nrow(map_clean)),
+  sprintf("Counts by tissue_group: %s", paste(capture.output(print(table(map_clean$tissue_group, useNA = "ifany"))), collapse = " ")),
+  sprintf("Counts by temperature_group: %s", paste(capture.output(print(table(map_clean$temperature_group, useNA = "ifany"))), collapse = " "))
+)
 
 expr_long <- expr |>
   select(all_of(c(probe_col, sample_cols))) |>
@@ -177,32 +282,31 @@ if (!is.na(symbol_col)) {
 merged <- expr_long |>
   left_join(symbols, by = probe_col) |>
   inner_join(map_clean, by = "sample_id")
-
 write_csv(merged, file.path(out_dir, "csv", "merged_expression_metadata_preview.csv"))
 
 bat <- merged |>
-  filter(str_to_upper(tissue_group) == "BAT", str_to_upper(temperature_group) %in% c("COLD", "CONTROL"))
+  mutate(tissue_group_up = safe_upper(tissue_group), temperature_group_up = safe_upper(temperature_group)) |>
+  filter(tissue_group_up == "BAT", temperature_group_up %in% c("COLD", "CONTROL"))
 
 if (nrow(bat) == 0) {
-  stop("No BAT samples with temperature_group in {COLD, CONTROL}. Fix sample map and rerun.")
+  stop("No BAT samples with COLD/CONTROL labels. Review inferred_or_input_sample_map.csv.")
 }
 
 bat_samples <- bat |>
   distinct(sample_id, temperature_group) |>
   arrange(temperature_group, sample_id)
-
 write_csv(bat_samples, file.path(out_dir, "csv", "bat_samples_used.csv"))
 
-log_lines <- c(log_lines,
-               sprintf("BAT analysis samples: %d", nrow(bat_samples)),
-               sprintf("BAT group counts: %s",
-                       paste(capture.output(print(table(bat_samples$temperature_group))), collapse = " ")))
+log_lines <- c(
+  log_lines,
+  sprintf("BAT analysis samples: %d", nrow(bat_samples)),
+  sprintf("BAT group counts: %s", paste(capture.output(print(table(bat_samples$temperature_group))), collapse = " "))
+)
 
 cldn1 <- bat |>
-  filter(str_to_upper(gene_symbol) == "CLDN1")
-
+  filter(safe_upper(gene_symbol) == "CLDN1")
 if (nrow(cldn1) == 0) {
-  stop("CLDN1 not found. Check annotation / mapping.")
+  stop("CLDN1 not found. Check platform annotation and gene symbol column.")
 }
 
 cldn1_vals <- cldn1 |>
@@ -221,11 +325,11 @@ cldn1_summary <- cldn1 |>
 write_csv(cldn1_summary, file.path(out_dir, "csv", "cldn1_group_summary.csv"))
 
 cold_vals <- cldn1 |>
-  filter(str_to_upper(temperature_group) == "COLD") |>
+  filter(safe_upper(temperature_group) == "COLD") |>
   pull(expression) |>
   na.omit()
 ctrl_vals <- cldn1 |>
-  filter(str_to_upper(temperature_group) == "CONTROL") |>
+  filter(safe_upper(temperature_group) == "CONTROL") |>
   pull(expression) |>
   na.omit()
 
@@ -254,8 +358,7 @@ write_csv(cldn1_stats, file.path(out_dir, "csv", "cldn1_stats.csv"))
 p <- ggplot(cldn1, aes(x = temperature_group, y = expression)) +
   geom_boxplot(fill = "#a6cee3") +
   geom_jitter(width = 0.12, color = "#1f78b4", size = 2) +
-  labs(title = "CLDN1 expression in human BAT: COLD vs CONTROL",
-       x = "Temperature group", y = "Expression") +
+  labs(title = "CLDN1 expression in human BAT: COLD vs CONTROL", x = "Temperature group", y = "Expression") +
   theme_bw(base_size = 12)
 
 ggsave(file.path(out_dir, "plots", "cldn1_bat_cold_vs_control.png"), plot = p, width = 7, height = 5, dpi = 300)
@@ -264,11 +367,9 @@ all_gene_stats <- bat |>
   filter(!is.na(gene_symbol)) |>
   group_by(gene_symbol) |>
   group_modify(~{
-    v_cold <- .x |> filter(str_to_upper(temperature_group) == "COLD") |> pull(expression) |> na.omit()
-    v_ctrl <- .x |> filter(str_to_upper(temperature_group) == "CONTROL") |> pull(expression) |> na.omit()
-    if (length(v_cold) < 2 || length(v_ctrl) < 2) {
-      return(tibble())
-    }
+    v_cold <- .x |> filter(safe_upper(temperature_group) == "COLD") |> pull(expression) |> na.omit()
+    v_ctrl <- .x |> filter(safe_upper(temperature_group) == "CONTROL") |> pull(expression) |> na.omit()
+    if (length(v_cold) < 2 || length(v_ctrl) < 2) return(tibble())
     t_res <- t.test(v_cold, v_ctrl)
     tibble(
       cold_mean = mean(v_cold),
@@ -285,10 +386,8 @@ if (nrow(all_gene_stats) > 0) {
     mutate(fdr_bh = p.adjust(p_value, method = "BH")) |>
     arrange(p_value)
 }
-
 write_csv(all_gene_stats, file.path(out_dir, "csv", "bat_cold_vs_control_all_genes.csv"))
 
 log_lines <- c(log_lines, "Output files written under:", normalizePath(out_dir))
 writeLines(log_lines, file.path(out_dir, "logs", "run_summary.txt"))
-
 cat("Analysis complete. See run summary:", file.path(out_dir, "logs", "run_summary.txt"), "\n")

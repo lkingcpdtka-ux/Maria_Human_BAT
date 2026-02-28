@@ -1,61 +1,83 @@
 # CLDN1 in human BAT after cold exposure (E-MTAB-4031)
 
-This repo contains an **R script** to test whether **CLDN1** is increased in **human BAT** after cold exposure using ArrayExpress study **E-MTAB-4031**.
+This repo now has an **R workflow with two stages**:
 
-## What this script does
+1. **Metadata sanity-check stage** (works with the files you already downloaded: `idf` + `sdrf`).
+2. **Expression analysis stage** (runs once you also download the processed expression matrix).
 
-- Reads a processed expression matrix and SDRF metadata.
-- Runs sanity checks so you can understand data structure before analysis.
-- Auto-infers sample groups (BAT/WAT and COLD/CONTROL), or accepts a manual sample map.
-- Extracts CLDN1 values in BAT and compares COLD vs CONTROL.
-- Produces output folders with plots, CSVs, and run logs.
+---
 
-## 1) Download files from ArrayExpress
+## Files you currently have
 
-Study page: https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-4031
+From your screenshot, you downloaded:
 
-Download at least:
+- `E-MTAB-4031.idf.txt`
+- `E-MTAB-4031.sdrf.txt`
 
-- Processed expression matrix (`E-MTAB-4031.processed.*.zip`)
-- SDRF file (`E-MTAB-4031.sdrf.txt`)
+That is enough to run **metadata-only sanity checks** and produce structured reports about how the dataset is organized.
 
-Optional (if gene symbols are missing from expression matrix):
-
-- Platform annotation table with `probe_id` and `gene_symbol`
-
-Suggested local structure:
-
-```bash
-mkdir -p data/E-MTAB-4031
-# unzip downloaded files into data/E-MTAB-4031
-```
-
-## 2) Install R packages
+## 1) Install R packages
 
 ```r
 install.packages(c("optparse", "readr", "dplyr", "tidyr", "stringr", "ggplot2"))
 ```
 
-## 3) Run analysis
+## 2) Run metadata-only sanity checks (with your current files)
 
 ```bash
 Rscript scripts/analyze_cldn1_bat_cold.R \
-  --expression "data/E-MTAB-4031/<your_processed_matrix>.txt" \
+  --idf "data/E-MTAB-4031/E-MTAB-4031.idf.txt" \
   --sdrf "data/E-MTAB-4031/E-MTAB-4031.sdrf.txt" \
+  --metadata-only \
   --out-dir "results/cldn1_bat_cold"
 ```
 
-If expression lacks gene symbols:
+This writes:
+
+- `results/cldn1_bat_cold/csv/sdrf_column_summary.csv`
+- `results/cldn1_bat_cold/csv/sdrf_tissue_related_preview.csv` (if tissue-related columns exist)
+- `results/cldn1_bat_cold/csv/sdrf_temperature_related_preview.csv` (if condition columns exist)
+- `results/cldn1_bat_cold/csv/sdrf_file_references.csv` (all file names referenced in SDRF)
+- `results/cldn1_bat_cold/csv/idf_file_references.csv` (file-like entries found in IDF)
+- `results/cldn1_bat_cold/logs/run_summary.txt`
+
+Use these files to understand data structure and identify what additional data file(s) you still need.
+
+## 3) Download missing expression file(s)
+
+Use `idf_file_references.csv` and `sdrf_file_references.csv` to identify the processed expression matrix filename(s) referenced by the study.
+
+After you download/unzip the processed matrix, run full analysis.
+
+## 4) Run full CLDN1 analysis
 
 ```bash
 Rscript scripts/analyze_cldn1_bat_cold.R \
-  --expression "data/E-MTAB-4031/<your_processed_matrix>.txt" \
+  --idf "data/E-MTAB-4031/E-MTAB-4031.idf.txt" \
   --sdrf "data/E-MTAB-4031/E-MTAB-4031.sdrf.txt" \
-  --platform-annotation "data/E-MTAB-4031/<annotation_file>.txt" \
+  --expression "data/E-MTAB-4031/<processed_expression_matrix>.txt" \
   --out-dir "results/cldn1_bat_cold"
 ```
 
-## 4) Output folders and files
+If gene symbols are not in the expression matrix, add:
+
+```bash
+  --platform-annotation "data/E-MTAB-4031/<annotation_file>.txt"
+```
+
+If automatic sample grouping is wrong, provide your own mapping:
+
+```bash
+  --sample-map "data/E-MTAB-4031/my_sample_map.csv"
+```
+
+Manual sample map columns:
+
+- `sample_id`
+- `tissue_group` (e.g., `BAT`)
+- `temperature_group` (`COLD` or `CONTROL`)
+
+## 5) Full-analysis outputs
 
 - `results/cldn1_bat_cold/plots/`
   - `cldn1_bat_cold_vs_control.png`
@@ -70,49 +92,13 @@ Rscript scripts/analyze_cldn1_bat_cold.R \
 - `results/cldn1_bat_cold/logs/`
   - `run_summary.txt`
 
-## 5) First-time ArrayExpress sanity workflow
-
-1. Run once using auto-inference.
-2. Open `run_summary.txt` and verify:
-   - expression and SDRF dimensions
-   - detected sample columns
-   - detected SDRF sample-ID column
-   - BAT and COLD/CONTROL counts
-3. Open `inferred_or_input_sample_map.csv` and verify group labels per sample.
-4. If labels are wrong, create a manual sample map and rerun with `--sample-map`.
-
-### Manual sample-map format
-
-CSV/TSV with columns:
-
-- `sample_id`
-- `tissue_group` (for example `BAT`)
-- `temperature_group` (`COLD` or `CONTROL`)
-
-Example:
-
-```csv
-sample_id,tissue_group,temperature_group
-Sample_01,BAT,COLD
-Sample_02,BAT,CONTROL
-```
-
-Run with manual map:
-
-```bash
-Rscript scripts/analyze_cldn1_bat_cold.R \
-  --expression "data/E-MTAB-4031/<your_processed_matrix>.txt" \
-  --sdrf "data/E-MTAB-4031/E-MTAB-4031.sdrf.txt" \
-  --sample-map "data/E-MTAB-4031/my_sample_map.csv" \
-  --out-dir "results/cldn1_bat_cold"
-```
-
 ## Interpretation notes
 
-- `cldn1_stats.csv` includes `log2_fc_cold_minus_control` as mean(COLD) - mean(CONTROL).
+- `cldn1_stats.csv` reports `log2_fc_cold_minus_control = mean(COLD) - mean(CONTROL)`.
 - Positive values suggest higher CLDN1 in cold-exposed BAT.
-- Treat p-values carefully if sample sizes are small.
+- Check sample counts and map quality first; small n can make p-values unstable.
 
-## Reference paper
+## Reference
 
-https://www.cell.com/cell-metabolism/fulltext/S1550-4131(16)30185-1
+- Study: https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-4031
+- Paper: https://www.cell.com/cell-metabolism/fulltext/S1550-4131(16)30185-1
