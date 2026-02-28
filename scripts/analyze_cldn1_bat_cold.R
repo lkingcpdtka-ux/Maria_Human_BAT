@@ -356,6 +356,18 @@ run_analysis <- function(opt) {
   invisible(list(mode = "full", out_dir = out_dir))
 }
 
+
+run_from_files <- function(sdrf, idf = NULL, expression = NULL, out_dir = "results/cldn1_bat_cold",
+                           sample_map = NULL, platform_annotation = NULL, metadata_only = FALSE) {
+  argv <- c("--sdrf", sdrf, "--out-dir", out_dir)
+  if (!is.null(idf)) argv <- c(argv, "--idf", idf)
+  if (!is.null(expression)) argv <- c(argv, "--expression", expression)
+  if (!is.null(sample_map)) argv <- c(argv, "--sample-map", sample_map)
+  if (!is.null(platform_annotation)) argv <- c(argv, "--platform-annotation", platform_annotation)
+  if (isTRUE(metadata_only)) argv <- c(argv, "--metadata-only")
+  main(argv)
+}
+
 main <- function(argv = commandArgs(trailingOnly = TRUE)) {
   opt <- parse_args(build_option_parser(), args = argv)
   run_analysis(opt)
@@ -363,4 +375,6 @@ main <- function(argv = commandArgs(trailingOnly = TRUE)) {
 
 if (sys.nframe() == 0) {
   main()
+} else {
+  message("analyze_cldn1_bat_cold.R loaded. Run main(c('--sdrf','<path>','--metadata-only')) or run_from_files(...).")
 }

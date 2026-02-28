@@ -16,6 +16,8 @@ The script is now refactored so you can either:
 - run with `Rscript ... --args`, or
 - `source()` it and call `main(c(...))` explicitly.
 
+When you use `source(..., echo=TRUE)`, R prints function definitions but does not execute the pipeline automatically (by design).
+
 ## 1) Install packages
 
 CRAN packages:
@@ -82,6 +84,25 @@ main(c(
   "--out-dir", "results/cldn1_bat_cold"
 ))
 ```
+
+Or use the convenience wrapper:
+
+```r
+source("scripts/analyze_cldn1_bat_cold.R")
+run_from_files(
+  sdrf = "data/E-MTAB-4031/E-MTAB-4031.sdrf.txt",
+  idf = "data/E-MTAB-4031/E-MTAB-4031.idf.txt",
+  metadata_only = TRUE,
+  out_dir = "results/cldn1_bat_cold"
+)
+```
+
+
+## 6) Notes specific to E-MTAB-4031 (ArrayExpress/BioStudies)
+
+On the study page, the MAGE-TAB metadata files are IDF and SDRF (which you already downloaded).
+Those files describe samples, array files, and relationships, but they are not the processed expression matrix itself.
+Use the generated `idf_file_references.csv` and `sdrf_file_references.csv` to identify the processed data file names you still need to download for full CLDN1 testing.
 
 ## References
 - Study: https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-4031
