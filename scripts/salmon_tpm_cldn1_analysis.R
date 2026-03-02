@@ -3,7 +3,7 @@
 ## =========================================================
 ## Salmon (gene-level) -> TPM matrix -> Sanity Checks + CLDN1
 ## Human BAT/WAT  Thermoneutral vs Cold Exposure (n = 1/group)
-## Dataset: E-MTAB-4031 (Jespersen / Scheele, Rigshospitalet)
+## Dataset: E-MTAB-4031 (UCSF Diabetes Center, HiSeq 2500, ~51 bp SE)
 ## Reference: GENCODE 38 (GRCh38)
 ##
 ## Design (from ArrayExpress E-MTAB-4031):
@@ -53,27 +53,19 @@ if (length(missing) > 0) {
 }
 cat("All 4 quantification files found.\n\n")
 
-## ---- 2b) Paired-end / library-type reminder ---------------------------------
+## ---- 2b) Library layout confirmation ----------------------------------------
 cat("========================================\n")
-cat("SANITY CHECK 1b: Paired-end handling\n")
+cat("SANITY CHECK 1b: Library layout\n")
 cat("========================================\n")
-cat("E-MTAB-4031 was sequenced with 100 bp paired-end reads (Illumina).\n")
-cat("You should have provided BOTH R1 and R2 FASTQ files to Salmon.\n")
+cat("E-MTAB-4031 was sequenced on Illumina HiSeq 2500.\n")
+cat("  Library layout : SINGLE-END\n")
+cat("  Read length    : ~51 bp\n")
+cat("  Reads per run  : ~13M (e.g. ERR1110588 = 13,425,365 reads)\n")
+cat("  Center         : UCSF Diabetes Center\n")
 cat("\n")
-cat("  In Galaxy Salmon quant:\n")
-cat("    - Select 'Paired-end' under library type\n")
-cat("    - Provide both mate 1 (R1) and mate 2 (R2) files\n")
-cat("    - If you only uploaded 1 FASTQ per sample, Salmon treated it as\n")
-cat("      single-end, which wastes half your data and lowers mapping rates.\n")
-cat("\n")
-cat("  How to check: Go back to your Galaxy history. For each sample you should\n")
-cat("  have downloaded TWO .fastq.gz files from ENA (e.g. *_1.fastq.gz and\n")
-cat("  *_2.fastq.gz). If you only see one file per sample, re-download from:\n")
-cat("    https://www.ebi.ac.uk/ena/browser/view/E-MTAB-4031\n")
-cat("\n")
-cat("  Expected Salmon mapping rate for paired-end human RNA-seq: 75-90%%.\n")
-cat("  If you ran paired-end correctly and got ~76%%, that is acceptable.\n")
-cat("  If you ran single-end only (R1), ~76%% is expected but suboptimal.\n")
+cat("  Your workflow (1 FASTQ per sample -> Galaxy Salmon quant) is CORRECT\n")
+cat("  for single-end data. A ~76%% mapping rate with 51 bp single-end reads\n")
+cat("  is reasonable for Salmon on human RNA-seq.\n")
 cat("\n")
 
 ## ---- 3) Read Salmon quant files + column validation -------------------------
@@ -643,14 +635,10 @@ cat("  5. Confirm Salmon was run with GENCODE 38 primary assembly (not the\n")
 cat("     full genome including scaffolds/patches) for clean gene-level quant.\n")
 cat("  6. If TPM sums deviate from 1,000,000, check that Salmon ran to\n")
 cat("     completion and that the GTF matches the transcriptome index.\n")
-cat("  7. E-MTAB-4031 is 100 bp paired-end (Illumina). Verify you gave\n")
-cat("     Salmon BOTH R1 and R2 FASTQs per sample, not just one file.\n")
-cat("  8. The original study (Sun et al. 2018, Nat Commun) used TopHat/hg19.\n")
-cat("     Re-quantifying with Salmon/GENCODE38 is valid but expect minor\n")
-cat("     differences from published values.\n")
-cat("  9. A mapping rate of ~76%% is acceptable for Salmon with human data.\n")
-cat("     Rates <60%% would indicate a problem (wrong reference, truncated\n")
-cat("     files, or adapter contamination). Rates >85%% are ideal.\n")
+cat("  7. E-MTAB-4031 is ~51 bp single-end (Illumina HiSeq 2500, UCSF\n")
+cat("     Diabetes Center). One FASTQ per sample is correct.\n")
+cat("  8. A ~76%% mapping rate is reasonable for 51 bp single-end human\n")
+cat("     RNA-seq in Salmon. Rates <60%% would indicate a problem.\n")
 cat("\n")
 
 ## ---- 16) Print all final plots in RStudio -----------------------------------
