@@ -49,6 +49,29 @@ if (length(missing) > 0) {
 }
 cat("All 4 quantification files found.\n\n")
 
+## ---- 2b) Paired-end / library-type reminder ---------------------------------
+cat("========================================\n")
+cat("SANITY CHECK 1b: Paired-end handling\n")
+cat("========================================\n")
+cat("E-MTAB-4031 was sequenced with 100 bp paired-end reads (Illumina).\n")
+cat("You should have provided BOTH R1 and R2 FASTQ files to Salmon.\n")
+cat("\n")
+cat("  In Galaxy Salmon quant:\n")
+cat("    - Select 'Paired-end' under library type\n")
+cat("    - Provide both mate 1 (R1) and mate 2 (R2) files\n")
+cat("    - If you only uploaded 1 FASTQ per sample, Salmon treated it as\n")
+cat("      single-end, which wastes half your data and lowers mapping rates.\n")
+cat("\n")
+cat("  How to check: Go back to your Galaxy history. For each sample you should\n")
+cat("  have downloaded TWO .fastq.gz files from ENA (e.g. *_1.fastq.gz and\n")
+cat("  *_2.fastq.gz). If you only see one file per sample, re-download from:\n")
+cat("    https://www.ebi.ac.uk/ena/browser/view/E-MTAB-4031\n")
+cat("\n")
+cat("  Expected Salmon mapping rate for paired-end human RNA-seq: 75-90%%.\n")
+cat("  If you ran paired-end correctly and got ~76%%, that is acceptable.\n")
+cat("  If you ran single-end only (R1), ~76%% is expected but suboptimal.\n")
+cat("\n")
+
 ## ---- 3) Read Salmon quant files + column validation -------------------------
 ## Salmon gene-level quant columns: Name, Length, EffectiveLength, TPM, NumReads
 expected_cols <- c("Name", "Length", "EffectiveLength", "TPM", "NumReads")
@@ -131,7 +154,30 @@ for (i in seq_len(nrow(per_sample_qc))) {
 }
 cat("\n")
 
-## 4d) Consistency: all samples should have the same gene set
+## 4d) Total mapped reads: flag if any sample has very few reads
+cat("-- Total mapped reads (NumReads sum) --\n")
+cat("  Low total reads (<5M) may indicate incomplete download or failed run.\n")
+for (i in seq_len(nrow(per_sample_qc))) {
+  s <- per_sample_qc$Sample[i]
+  tr <- per_sample_qc$total_reads[i]
+  flag <- if (tr < 5e6) " ** WARNING: very low read count **" else " OK"
+  cat(sprintf("  %s: %.1fM reads%s\n", s, tr / 1e6, flag))
+}
+cat("\n")
+
+## 4e) Zero-expression fraction
+cat("-- Zero-expression fraction --\n")
+cat("  Typical: 40-60%% of GENCODE genes have TPM=0 in a given tissue.\n")
+cat("  Very high (>80%%) suggests mapping problems.\n")
+for (i in seq_len(nrow(per_sample_qc))) {
+  s <- per_sample_qc$Sample[i]
+  zp <- per_sample_qc$zero_TPM_pct[i]
+  flag <- if (zp > 80) " ** WARNING: unusually high **" else " OK"
+  cat(sprintf("  %s: %.1f%% zero-TPM%s\n", s, zp, flag))
+}
+cat("\n")
+
+## 4f) Consistency: all samples should have the same gene set
 gene_sets <- map(raw_list, ~ sort(.x$Name))
 if (length(unique(gene_sets)) != 1) {
   cat("** WARNING: Gene ID sets differ between samples! **\n")
@@ -465,6 +511,14 @@ cat("  5. Confirm Salmon was run with GENCODE 38 primary assembly (not the\n")
 cat("     full genome including scaffolds/patches) for clean gene-level quant.\n")
 cat("  6. If TPM sums deviate from 1,000,000, check that Salmon ran to\n")
 cat("     completion and that the GTF matches the transcriptome index.\n")
+cat("  7. E-MTAB-4031 is 100 bp paired-end (Illumina). Verify you gave\n")
+cat("     Salmon BOTH R1 and R2 FASTQs per sample, not just one file.\n")
+cat("  8. The original study (Sun et al. 2018, Nat Commun) used TopHat/hg19.\n")
+cat("     Re-quantifying with Salmon/GENCODE38 is valid but expect minor\n")
+cat("     differences from published values.\n")
+cat("  9. A mapping rate of ~76%% is acceptable for Salmon with human data.\n")
+cat("     Rates <60%% would indicate a problem (wrong reference, truncated\n")
+cat("     files, or adapter contamination). Rates >85%% are ideal.\n")
 cat("\n")
 
 print(p_ucp1)
