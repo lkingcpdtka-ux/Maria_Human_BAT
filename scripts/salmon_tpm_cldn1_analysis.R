@@ -22,8 +22,12 @@ suppressPackageStartupMessages({
   library(ggplot2)
 })
 
-## ---- 0) Working directory ---------------------------------------------------
+## ---- 0) Working directory + output folder -----------------------------------
 setwd("C:/Users/lking/OneDrive - Louisiana State University/PBRC/Bioinformatics/Maria_Human_BAT/FASTQ")
+
+results_dir <- file.path(getwd(), "results")
+dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
+cat("Results will be saved to:", results_dir, "\n\n")
 
 ## ---- 1) Input files ---------------------------------------------------------
 files <- c(
@@ -218,8 +222,8 @@ if (length(dup_ids) > 0) {
 }
 
 ## Write TPM matrix to disk
-write.csv(tpm_mat, "TPM_matrix_gene_level.csv", row.names = FALSE)
-cat("Wrote: TPM_matrix_gene_level.csv\n\n")
+write.csv(tpm_mat, file.path(results_dir, "TPM_matrix_gene_level.csv"), row.names = FALSE)
+cat("Wrote: results/TPM_matrix_gene_level.csv\n\n")
 
 ## ---- 6) Cross-sample QC ----------------------------------------------------
 cat("========================================\n")
@@ -267,8 +271,8 @@ p_pca <- ggplot(pca_df, aes(x = PC1, y = PC2, color = Tissue, shape = Condition)
     x = sprintf("PC1 (%.1f%%)", var_expl[1]),
     y = sprintf("PC2 (%.1f%%)", var_expl[2])
   )
-ggsave("QC_PCA_plot.png", p_pca, width = 6.5, height = 5, dpi = 300)
-cat("Saved: QC_PCA_plot.png\n")
+ggsave(file.path(results_dir, "QC_PCA_plot.png"), p_pca, width = 6.5, height = 5, dpi = 300)
+cat("Saved: results/QC_PCA_plot.png\n")
 cat("  Expect BAT and WAT to separate on PC1.\n\n")
 
 ## 6c) Density plot of log2(TPM + 1)
@@ -284,8 +288,8 @@ p_density <- ggplot(density_df, aes(x = log2TPM1, color = Sample)) +
     x = "log2(TPM + 1)",
     y = "Density"
   )
-ggsave("QC_density_plot.png", p_density, width = 7, height = 4.5, dpi = 300)
-cat("Saved: QC_density_plot.png\n")
+ggsave(file.path(results_dir, "QC_density_plot.png"), p_density, width = 7, height = 4.5, dpi = 300)
+cat("Saved: results/QC_density_plot.png\n")
 cat("  Curves should largely overlap; a shifted sample indicates a QC issue.\n\n")
 
 ## ---- 7) Biological sanity checks (marker genes) ----------------------------
@@ -377,10 +381,10 @@ if (!is.na(dio2_bat_tn) && !is.na(dio2_bat_ce)) {
 cat("\n")
 
 ## Save marker table
-write.csv(marker_wide, "QC_marker_gene_table.csv", row.names = FALSE)
-cat("Saved: QC_marker_gene_table.csv\n\n")
+write.csv(marker_wide, file.path(results_dir, "QC_marker_gene_table.csv"), row.names = FALSE)
+cat("Saved: results/QC_marker_gene_table.csv\n\n")
 
-## ---- 8) Helpers for gene plots and fold-change ------------------------------
+## ---- 8) Helpers -------------------------------------------------------------
 
 make_gene_long <- function(gene_id, gene_label = gene_id) {
   g <- tpm_mat %>% filter(GeneID == gene_id)
@@ -400,19 +404,6 @@ make_gene_long <- function(gene_id, gene_label = gene_id) {
       Condition = ifelse(grepl("_CE$", Sample), "Cold", "TN"),
       Condition = factor(Condition, levels = c("TN", "Cold")),
       Tissue    = factor(Tissue, levels = c("WAT", "BAT"))
-    )
-}
-
-plot_gene_lines <- function(df_long) {
-  ggplot(df_long, aes(x = Condition, y = TPM, group = Tissue, color = Tissue)) +
-    geom_point(size = 4) +
-    geom_line(linewidth = 1.2) +
-    theme_classic(base_size = 14) +
-    labs(
-      title = paste0(df_long$GeneLabel[1], " expression (TPM)  [n = 1/group]"),
-      subtitle = "Descriptive only — no statistical inference",
-      x = NULL,
-      y = "TPM"
     )
 }
 
@@ -444,35 +435,162 @@ print(lep_long %>% select(GeneLabel, Sample, Tissue, Condition, TPM))
 cat("\nCLDN1 TPM values:\n")
 print(cldn1_long %>% select(GeneLabel, Sample, Tissue, Condition, TPM))
 
-## ---- 10) Plots + fold-change tables ----------------------------------------
-p_ucp1  <- plot_gene_lines(ucp1_long)
-p_lep   <- plot_gene_lines(lep_long)
-p_cldn1 <- plot_gene_lines(cldn1_long)
+## ---- 10) VISUALIZATION 1: Grouped bar charts (per gene) --------------------
+## Bar charts are more honest than line plots for n=1 data.
+## Lines imply a continuous trajectory; bars show individual observations.
 
-ggsave("UCP1_TPM_control_plot.png",   p_ucp1,  width = 5.5, height = 4.5, dpi = 300)
-ggsave("LEP_TPM_WAT_marker_plot.png", p_lep,   width = 5.5, height = 4.5, dpi = 300)
-ggsave("CLDN1_TPM_plot.png",          p_cldn1, width = 5.5, height = 4.5, dpi = 300)
+plot_gene_bars <- function(df_long) {
+  ggplot(df_long, aes(x = Tissue, y = TPM, fill = Condition)) +
+    geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+    scale_fill_manual(values = c("TN" = "#4393C3", "Cold" = "#D6604D"),
+                      labels = c("TN" = "Thermoneutral", "Cold" = "Cold Exposure")) +
+    theme_classic(base_size = 14) +
+    theme(legend.position = "top") +
+    labs(
+      title = paste0(df_long$GeneLabel[1], " expression (TPM)"),
+      subtitle = "n = 1 per group — descriptive only",
+      x = NULL, y = "TPM", fill = NULL
+    )
+}
 
-cat("\nSaved gene plots:\n")
-cat("  - UCP1_TPM_control_plot.png\n")
-cat("  - LEP_TPM_WAT_marker_plot.png\n")
-cat("  - CLDN1_TPM_plot.png\n\n")
+p_ucp1  <- plot_gene_bars(ucp1_long)
+p_lep   <- plot_gene_bars(lep_long)
+p_cldn1 <- plot_gene_bars(cldn1_long)
 
-## Descriptive fold-changes
+ggsave(file.path(results_dir, "UCP1_bar.png"),  p_ucp1,  width = 5, height = 4.5, dpi = 300)
+ggsave(file.path(results_dir, "LEP_bar.png"),   p_lep,   width = 5, height = 4.5, dpi = 300)
+ggsave(file.path(results_dir, "CLDN1_bar.png"), p_cldn1, width = 5, height = 4.5, dpi = 300)
+cat("\nSaved individual bar charts to results/\n")
+
+## ---- 11) VISUALIZATION 2: Combined multi-panel figure -----------------------
+## Shows UCP1, LEP, and CLDN1 side-by-side with independent y-axes.
+## This is the most informative single figure for this analysis.
+
+all_long <- bind_rows(ucp1_long, lep_long, cldn1_long) %>%
+  mutate(GeneLabel = factor(GeneLabel, levels = c("UCP1", "LEP", "CLDN1")))
+
+p_combined <- ggplot(all_long, aes(x = Tissue, y = TPM, fill = Condition)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  scale_fill_manual(values = c("TN" = "#4393C3", "Cold" = "#D6604D"),
+                    labels = c("TN" = "Thermoneutral", "Cold" = "Cold Exposure")) +
+  facet_wrap(~ GeneLabel, scales = "free_y", nrow = 1) +
+  theme_classic(base_size = 13) +
+  theme(
+    legend.position = "top",
+    strip.text = element_text(face = "bold", size = 13)
+  ) +
+  labs(
+    title = "Gene expression: Controls (UCP1, LEP) + Gene of Interest (CLDN1)",
+    subtitle = "E-MTAB-4031  |  n = 1 per group  |  descriptive only",
+    x = NULL, y = "TPM", fill = NULL
+  )
+
+ggsave(file.path(results_dir, "combined_panel.png"), p_combined,
+       width = 11, height = 4.5, dpi = 300)
+cat("Saved: results/combined_panel.png\n")
+
+## ---- 12) VISUALIZATION 3: CLDN1 with noise-floor annotation -----------------
+## CLDN1 values are extremely low (<0.04 TPM in all samples).
+## A dedicated plot with a noise threshold makes this visually obvious.
+
+noise_threshold <- 0.1  # genes below this TPM are unreliable at gene level
+
+p_cldn1_annotated <- ggplot(cldn1_long, aes(x = Tissue, y = TPM, fill = Condition)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  scale_fill_manual(values = c("TN" = "#4393C3", "Cold" = "#D6604D"),
+                    labels = c("TN" = "Thermoneutral", "Cold" = "Cold Exposure")) +
+  geom_hline(yintercept = noise_threshold, linetype = "dashed", color = "grey40") +
+  annotate("text", x = 2.4, y = noise_threshold + 0.008,
+           label = "noise floor (~0.1 TPM)", size = 3.3, color = "grey40") +
+  theme_classic(base_size = 14) +
+  theme(legend.position = "top") +
+  labs(
+    title = "CLDN1 (Claudin-1) expression",
+    subtitle = "All values below noise floor — not reliably detected",
+    x = NULL, y = "TPM", fill = NULL
+  )
+
+ggsave(file.path(results_dir, "CLDN1_with_noise_floor.png"), p_cldn1_annotated,
+       width = 5.5, height = 5, dpi = 300)
+cat("Saved: results/CLDN1_with_noise_floor.png\n")
+
+## ---- 13) VISUALIZATION 4: Marker gene heatmap (log10 scale) ----------------
+## Shows all marker genes in one figure. Good for the QC overview.
+
+heat_df <- marker_tpm %>%
+  select(Symbol, all_of(sample_names)) %>%
+  pivot_longer(-Symbol, names_to = "Sample", values_to = "TPM") %>%
+  mutate(
+    log10TPM1 = log10(TPM + 1),
+    Symbol = factor(Symbol, levels = rev(c("UCP1", "CIDEA", "DIO2", "ADIPOQ", "LEP", "OSBPL7", "CLDN1"))),
+    Sample = factor(Sample, levels = c("WAT_TN", "WAT_CE", "BAT_TN", "BAT_CE"))
+  )
+
+p_heat <- ggplot(heat_df, aes(x = Sample, y = Symbol, fill = log10TPM1)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = sprintf("%.2f", TPM)), size = 3) +
+  scale_fill_gradient(low = "white", high = "#B2182B",
+                      name = "log10(TPM+1)") +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    panel.grid = element_blank()
+  ) +
+  labs(
+    title = "Marker gene heatmap (TPM values shown in cells)",
+    subtitle = "E-MTAB-4031  |  n = 1 per group",
+    x = NULL, y = NULL
+  )
+
+ggsave(file.path(results_dir, "marker_gene_heatmap.png"), p_heat,
+       width = 7, height = 5, dpi = 300)
+cat("Saved: results/marker_gene_heatmap.png\n")
+
+## ---- 14) Descriptive fold-change tables + bar chart -------------------------
 fc_ucp1  <- desc_log2fc(ucp1_long)
 fc_lep   <- desc_log2fc(lep_long)
 fc_cldn1 <- desc_log2fc(cldn1_long)
 
-write.csv(fc_ucp1,  "UCP1_descriptive_log2FC.csv",  row.names = FALSE)
-write.csv(fc_lep,   "LEP_descriptive_log2FC.csv",   row.names = FALSE)
-write.csv(fc_cldn1, "CLDN1_descriptive_log2FC.csv", row.names = FALSE)
+fc_all <- bind_rows(fc_ucp1, fc_lep, fc_cldn1)
+write.csv(fc_all, file.path(results_dir, "descriptive_log2FC_all.csv"), row.names = FALSE)
+cat("Saved: results/descriptive_log2FC_all.csv\n")
 
-cat("Wrote descriptive fold-change tables:\n")
-cat("  - UCP1_descriptive_log2FC.csv\n")
-cat("  - LEP_descriptive_log2FC.csv\n")
-cat("  - CLDN1_descriptive_log2FC.csv\n\n")
+## log2FC bar chart
+fc_plot_df <- fc_all %>%
+  mutate(
+    GeneLabel = factor(GeneLabel, levels = c("UCP1", "LEP", "CLDN1")),
+    ## flag CLDN1 WAT fold-change as unreliable (0 -> noise)
+    reliable = !(GeneLabel == "CLDN1" & Tissue == "WAT")
+  )
 
-## ---- 11) Final CLDN1 summary ------------------------------------------------
+p_fc <- ggplot(fc_plot_df, aes(x = Tissue, y = log2FC_Cold_vs_TN, fill = Tissue)) +
+  geom_col(width = 0.6) +
+  geom_hline(yintercept = 0, linewidth = 0.4) +
+  ## Cross out unreliable bars (CLDN1 WAT: 0 -> 0.008 = noise artifact)
+  geom_text(
+    data = fc_plot_df %>% filter(!reliable),
+    aes(label = "artifact\n(0 -> noise)"),
+    vjust = -0.3, size = 2.8, color = "grey40"
+  ) +
+  scale_fill_manual(values = c("WAT" = "#FDB863", "BAT" = "#B2ABD2")) +
+  facet_wrap(~ GeneLabel, nrow = 1) +
+  theme_classic(base_size = 13) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 13)
+  ) +
+  labs(
+    title = "Descriptive log2 fold-change (Cold Exposure vs Thermoneutral)",
+    subtitle = "n = 1 — NOT statistical inference",
+    x = NULL, y = "log2FC (CE / TN)"
+  )
+
+ggsave(file.path(results_dir, "log2FC_bar_chart.png"), p_fc,
+       width = 10, height = 4.5, dpi = 300)
+cat("Saved: results/log2FC_bar_chart.png\n\n")
+
+## ---- 15) Final CLDN1 summary ------------------------------------------------
 cat("========================================\n")
 cat("CLDN1 (Claudin-1) summary\n")
 cat("========================================\n")
@@ -486,19 +604,33 @@ cat(sprintf("  BAT thermoneutral: %.4f TPM\n", cldn1_bat_tn))
 cat(sprintf("  BAT cold exposure: %.4f TPM\n", cldn1_bat_ce))
 cat(sprintf("  WAT thermoneutral: %.4f TPM\n", cldn1_wat_tn))
 cat(sprintf("  WAT cold exposure: %.4f TPM\n", cldn1_wat_ce))
-cat(sprintf("  BAT log2FC (CE/TN): %.3f\n", log2((cldn1_bat_ce + 1e-6) / (cldn1_bat_tn + 1e-6))))
-cat(sprintf("  WAT log2FC (CE/TN): %.3f\n", log2((cldn1_wat_ce + 1e-6) / (cldn1_wat_tn + 1e-6))))
 cat("\n")
 
-if (cldn1_bat_ce > cldn1_bat_tn) {
-  cat("  -> CLDN1 TPM is HIGHER in BAT after cold exposure.\n")
-} else if (cldn1_bat_ce < cldn1_bat_tn) {
-  cat("  -> CLDN1 TPM is LOWER in BAT after cold exposure.\n")
+## Only report fold-change when both values are above noise
+if (cldn1_bat_tn >= noise_threshold || cldn1_bat_ce >= noise_threshold) {
+  cat(sprintf("  BAT log2FC (CE/TN): %.3f\n",
+              log2((cldn1_bat_ce + 1e-6) / (cldn1_bat_tn + 1e-6))))
 } else {
-  cat("  -> CLDN1 TPM is unchanged in BAT after cold exposure.\n")
+  cat("  BAT log2FC: not meaningful (both values below noise floor).\n")
 }
-
+if (cldn1_wat_tn >= noise_threshold || cldn1_wat_ce >= noise_threshold) {
+  cat(sprintf("  WAT log2FC (CE/TN): %.3f\n",
+              log2((cldn1_wat_ce + 1e-6) / (cldn1_wat_tn + 1e-6))))
+} else {
+  cat("  WAT log2FC: not meaningful (both values below noise floor).\n")
+}
 cat("\n")
+
+cat("  INTERPRETATION:\n")
+cat("  CLDN1 is NOT reliably detected in any of the 4 samples (all < 0.04 TPM).\n")
+cat("  These values are below the noise floor for gene-level Salmon quantification.\n")
+cat("  There is NO evidence of cold-induced CLDN1 expression in BAT from this\n")
+cat("  dataset, but this does not prove CLDN1 is absent — the gene may be\n")
+cat("  expressed at very low levels or in a small subset of cells not captured\n")
+cat("  by bulk RNA-seq. Confirmation would require targeted methods (qPCR,\n")
+cat("  single-cell RNA-seq, or immunohistochemistry).\n")
+cat("\n")
+
 cat("========================================\n")
 cat("IMPORTANT CAVEATS\n")
 cat("========================================\n")
@@ -521,8 +653,27 @@ cat("     Rates <60%% would indicate a problem (wrong reference, truncated\n")
 cat("     files, or adapter contamination). Rates >85%% are ideal.\n")
 cat("\n")
 
-print(p_ucp1)
-print(p_lep)
-print(p_cldn1)
+## ---- 16) Print all final plots in RStudio -----------------------------------
+print(p_combined)
+print(p_cldn1_annotated)
+print(p_heat)
+print(p_fc)
 
-cat("Done.\n")
+cat("========================================\n")
+cat("All outputs saved to: results/\n")
+cat("========================================\n")
+cat("  Plots:\n")
+cat("    combined_panel.png          <- best overview figure\n")
+cat("    CLDN1_with_noise_floor.png  <- key finding: CLDN1 below detection\n")
+cat("    marker_gene_heatmap.png     <- QC: all markers at a glance\n")
+cat("    log2FC_bar_chart.png        <- fold-change comparison\n")
+cat("    UCP1_bar.png                <- positive control (BAT identity)\n")
+cat("    LEP_bar.png                 <- tissue identity control\n")
+cat("    CLDN1_bar.png               <- gene of interest\n")
+cat("    QC_PCA_plot.png             <- sample clustering\n")
+cat("    QC_density_plot.png         <- expression distribution\n")
+cat("  Tables:\n")
+cat("    TPM_matrix_gene_level.csv   <- full TPM matrix\n")
+cat("    QC_marker_gene_table.csv    <- marker gene summary\n")
+cat("    descriptive_log2FC_all.csv  <- fold-changes for UCP1/LEP/CLDN1\n")
+cat("\nDone.\n")
