@@ -290,91 +290,197 @@ cat("SANITY CHECK 6: Biological marker genes\n")
 cat("========================================\n")
 
 markers <- tribble(
-  ~GeneID,              ~Symbol,  ~Expectation,
-  "ENSG00000109424",    "UCP1",   "High in BAT, low/absent in WAT; may increase with cold in BAT",
-  "ENSG00000174697",    "LEP",    "High in WAT, low in BAT",
-  "ENSG00000163347",    "CLDN1",  "Gene of interest (claudin-1)",
-  "ENSG00000147655",    "CIDEA",  "BAT marker; higher in BAT than WAT",
-  "ENSG00000211448",    "DIO2",   "Cold-responsive in BAT (type 2 deiodinase)",
-  "ENSG00000181092",    "ADIPOQ", "Adiponectin; expressed in both, often higher in WAT",
-  "ENSG00000006025",    "OSBPL7", "Negative control – housekeeping-like, should be stable"
+  ~GeneID,              ~Symbol,    ~Category,
+  ## ---- BAT identity markers (should be HIGH in BAT, LOW in WAT) ----
+  "ENSG00000109424",    "UCP1",     "BAT identity",
+  "ENSG00000147655",    "CIDEA",    "BAT identity",
+  "ENSG00000142611",    "PRDM16",   "BAT identity",
+  "ENSG00000109819",    "PPARGC1A", "BAT identity",
+  "ENSG00000119915",    "ELOVL3",   "BAT identity",
+  "ENSG00000152977",    "ZIC1",     "BAT identity",
+  "ENSG00000162624",    "LHX8",     "BAT identity",
+  "ENSG00000221818",    "EBF2",     "BAT identity",
+
+  ## ---- WAT identity markers (should be HIGH in WAT, LOW in BAT) ----
+  "ENSG00000174697",    "LEP",      "WAT identity",
+  "ENSG00000037965",    "HOXC8",    "WAT identity",
+  "ENSG00000180806",    "HOXC9",    "WAT identity",
+  "ENSG00000118526",    "TCF21",    "WAT identity",
+
+  ## ---- Cold-responsive in BAT (should go UP in BAT_CE vs BAT_TN) ----
+  "ENSG00000211448",    "DIO2",     "Cold-responsive",
+  "ENSG00000205560",    "CPT1B",    "Cold-responsive",
+  "ENSG00000124253",    "PCK1",     "Cold-responsive",
+  "ENSG00000178537",    "SLC25A20", "Cold-responsive",
+
+  ## ---- Pan-adipocyte (should be expressed >1 TPM in all samples) ----
+  "ENSG00000181092",    "ADIPOQ",   "Pan-adipocyte",
+  "ENSG00000170323",    "FABP4",    "Pan-adipocyte",
+  "ENSG00000132170",    "PPARG",    "Pan-adipocyte",
+  "ENSG00000166819",    "PLIN1",    "Pan-adipocyte",
+
+  ## ---- Thermogenesis pathway ----
+  "ENSG00000188778",    "ADRB3",    "Thermogenesis",
+  "ENSG00000105550",    "FGF21",    "Thermogenesis",
+  "ENSG00000112715",    "VEGFA",    "Thermogenesis",
+
+  ## ---- Housekeeping (should be stable across all 4 samples) ----
+  "ENSG00000075624",    "ACTB",     "Housekeeping",
+  "ENSG00000111640",    "GAPDH",    "Housekeeping",
+  "ENSG00000166710",    "B2M",      "Housekeeping",
+  "ENSG00000142541",    "RPL13A",   "Housekeeping",
+  "ENSG00000089157",    "RPLP0",    "Housekeeping",
+
+  ## ---- Tight junction family (context for CLDN1) ----
+  "ENSG00000163347",    "CLDN1",    "Tight junction",
+  "ENSG00000184113",    "CLDN5",    "Tight junction",
+  "ENSG00000197822",    "OCLN",     "Tight junction",
+  "ENSG00000104067",    "TJP1",     "Tight junction"
 )
 
 marker_tpm <- markers %>%
   left_join(tpm_mat, by = "GeneID")
 
-cat("\nMarker gene TPM values:\n")
-marker_long <- marker_tpm %>%
-  pivot_longer(
-    cols = all_of(sample_names),
-    names_to = "Sample",
-    values_to = "TPM"
-  ) %>%
-  select(Symbol, Sample, TPM, Expectation)
+## Report any markers not found in the TPM matrix
+missing_markers <- marker_tpm %>% filter(is.na(WAT_TN))
+if (nrow(missing_markers) > 0) {
+  cat("  WARNING: These markers were NOT found in the TPM matrix:\n")
+  cat(paste0("    ", missing_markers$Symbol, " (", missing_markers$GeneID, ")"), sep = "\n")
+  cat("\n")
+}
 
 marker_wide <- marker_tpm %>%
-  select(Symbol, all_of(sample_names), Expectation)
+  select(Category, Symbol, all_of(sample_names))
 
-print(as.data.frame(marker_wide), row.names = FALSE)
+cat("\nFull marker gene TPM table (35 genes, 7 categories):\n")
+print(as.data.frame(marker_wide), row.names = FALSE, digits = 4)
 cat("\n")
 
-## Biological plausibility flags
+## Save full marker table
+write.csv(marker_wide, file.path(results_dir, "QC_marker_gene_table.csv"), row.names = FALSE)
+cat("Saved: results/QC_marker_gene_table.csv\n\n")
+
+## ---- 7b) Automated pass/fail scoring ---------------------------------------
+cat("========================================\n")
+cat("SANITY CHECK 7: Automated marker scoring\n")
+cat("========================================\n")
+
 get_tpm <- function(sym, samp) {
   v <- marker_tpm %>% filter(Symbol == sym) %>% pull(!!sym(samp))
   if (length(v) == 0) return(NA_real_)
   v
 }
 
-ucp1_bat_tn <- get_tpm("UCP1", "BAT_TN")
-ucp1_wat_tn <- get_tpm("UCP1", "WAT_TN")
-lep_wat_tn  <- get_tpm("LEP",  "WAT_TN")
-lep_bat_tn  <- get_tpm("LEP",  "BAT_TN")
+pass_count <- 0
+total_count <- 0
 
-cat("Biological plausibility checks:\n")
-
-if (!is.na(ucp1_bat_tn) && !is.na(ucp1_wat_tn)) {
-  if (ucp1_bat_tn > ucp1_wat_tn) {
-    cat("  [PASS] UCP1 is higher in BAT_TN than WAT_TN.\n")
+## --- BAT identity: each should be higher in BAT_TN than WAT_TN ---
+cat("\n-- BAT identity markers (expect BAT_TN > WAT_TN) --\n")
+bat_markers <- markers %>% filter(Category == "BAT identity") %>% pull(Symbol)
+for (g in bat_markers) {
+  bat_val <- get_tpm(g, "BAT_TN")
+  wat_val <- get_tpm(g, "WAT_TN")
+  total_count <- total_count + 1
+  if (!is.na(bat_val) && !is.na(wat_val)) {
+    if (bat_val > wat_val) {
+      cat(sprintf("  [PASS] %s: BAT=%.3f > WAT=%.3f\n", g, bat_val, wat_val))
+      pass_count <- pass_count + 1
+    } else {
+      cat(sprintf("  [FAIL] %s: BAT=%.3f <= WAT=%.3f\n", g, bat_val, wat_val))
+    }
   } else {
-    cat("  [WARN] UCP1 is NOT higher in BAT than WAT — samples may be swapped!\n")
+    cat(sprintf("  [SKIP] %s: not found in matrix\n", g))
   }
+}
+
+## --- WAT identity: each should be higher in WAT_TN than BAT_TN ---
+cat("\n-- WAT identity markers (expect WAT_TN > BAT_TN) --\n")
+wat_markers <- markers %>% filter(Category == "WAT identity") %>% pull(Symbol)
+for (g in wat_markers) {
+  wat_val <- get_tpm(g, "WAT_TN")
+  bat_val <- get_tpm(g, "BAT_TN")
+  total_count <- total_count + 1
+  if (!is.na(bat_val) && !is.na(wat_val)) {
+    if (wat_val > bat_val) {
+      cat(sprintf("  [PASS] %s: WAT=%.3f > BAT=%.3f\n", g, wat_val, bat_val))
+      pass_count <- pass_count + 1
+    } else {
+      cat(sprintf("  [FAIL] %s: WAT=%.3f <= BAT=%.3f\n", g, wat_val, bat_val))
+    }
+  } else {
+    cat(sprintf("  [SKIP] %s: not found in matrix\n", g))
+  }
+}
+
+## --- Cold-responsive: should increase in BAT with cold (BAT_CE > BAT_TN) ---
+cat("\n-- Cold-responsive markers (expect BAT_CE > BAT_TN) --\n")
+cold_markers <- markers %>% filter(Category == "Cold-responsive") %>% pull(Symbol)
+for (g in cold_markers) {
+  tn_val <- get_tpm(g, "BAT_TN")
+  ce_val <- get_tpm(g, "BAT_CE")
+  total_count <- total_count + 1
+  if (!is.na(tn_val) && !is.na(ce_val)) {
+    if (ce_val > tn_val) {
+      cat(sprintf("  [PASS] %s: BAT_CE=%.3f > BAT_TN=%.3f\n", g, ce_val, tn_val))
+      pass_count <- pass_count + 1
+    } else {
+      cat(sprintf("  [FAIL] %s: BAT_CE=%.3f <= BAT_TN=%.3f\n", g, ce_val, tn_val))
+    }
+  } else {
+    cat(sprintf("  [SKIP] %s: not found in matrix\n", g))
+  }
+}
+
+## --- Pan-adipocyte: should be >1 TPM in all 4 samples ---
+cat("\n-- Pan-adipocyte markers (expect >1 TPM in all samples) --\n")
+pan_markers <- markers %>% filter(Category == "Pan-adipocyte") %>% pull(Symbol)
+for (g in pan_markers) {
+  vals <- sapply(sample_names, function(s) get_tpm(g, s))
+  total_count <- total_count + 1
+  if (all(!is.na(vals))) {
+    min_val <- min(vals)
+    if (min_val > 1) {
+      cat(sprintf("  [PASS] %s: min TPM = %.2f (all > 1)\n", g, min_val))
+      pass_count <- pass_count + 1
+    } else {
+      cat(sprintf("  [FAIL] %s: min TPM = %.2f (below 1 in at least one sample)\n", g, min_val))
+    }
+  } else {
+    cat(sprintf("  [SKIP] %s: not found in matrix\n", g))
+  }
+}
+
+## --- Housekeeping: CV across 4 samples should be < 50% ---
+cat("\n-- Housekeeping markers (expect CV < 50%% across samples) --\n")
+hk_markers <- markers %>% filter(Category == "Housekeeping") %>% pull(Symbol)
+for (g in hk_markers) {
+  vals <- sapply(sample_names, function(s) get_tpm(g, s))
+  total_count <- total_count + 1
+  if (all(!is.na(vals)) && mean(vals) > 0) {
+    cv <- 100 * sd(vals) / mean(vals)
+    if (cv < 50) {
+      cat(sprintf("  [PASS] %s: CV = %.1f%%, mean = %.1f TPM\n", g, cv, mean(vals)))
+      pass_count <- pass_count + 1
+    } else {
+      cat(sprintf("  [FAIL] %s: CV = %.1f%% (too variable), mean = %.1f TPM\n", g, cv, mean(vals)))
+    }
+  } else {
+    cat(sprintf("  [SKIP] %s: not found or zero mean\n", g))
+  }
+}
+
+## --- Summary score ---
+cat(sprintf("\n** OVERALL SCORE: %d / %d marker checks passed **\n", pass_count, total_count))
+if (pass_count >= total_count * 0.75) {
+  cat("   -> Data looks GOOD: >=75%% of expected patterns confirmed.\n")
+} else if (pass_count >= total_count * 0.5) {
+  cat("   -> Data looks MARGINAL: 50-75%% of expected patterns confirmed.\n")
+  cat("   -> Some markers don't match expectations. Review sample labels and mapping.\n")
 } else {
-  cat("  [WARN] UCP1 not found in TPM matrix — check gene ID ENSG00000109424.\n")
-}
-
-if (!is.na(lep_wat_tn) && !is.na(lep_bat_tn)) {
-  if (lep_wat_tn > lep_bat_tn) {
-    cat("  [PASS] LEP is higher in WAT_TN than BAT_TN.\n")
-  } else {
-    cat("  [WARN] LEP is NOT higher in WAT — unexpected, check sample labels.\n")
-  }
-} else {
-  cat("  [WARN] LEP not found in TPM matrix — check gene ID ENSG00000174697.\n")
-}
-
-## CIDEA check
-cidea_bat <- get_tpm("CIDEA", "BAT_TN")
-cidea_wat <- get_tpm("CIDEA", "WAT_TN")
-if (!is.na(cidea_bat) && !is.na(cidea_wat)) {
-  if (cidea_bat > cidea_wat) {
-    cat("  [PASS] CIDEA is higher in BAT_TN than WAT_TN.\n")
-  } else {
-    cat("  [WARN] CIDEA is NOT higher in BAT — review sample identity.\n")
-  }
-}
-
-## DIO2 cold-responsiveness in BAT
-dio2_bat_tn <- get_tpm("DIO2", "BAT_TN")
-dio2_bat_ce <- get_tpm("DIO2", "BAT_CE")
-if (!is.na(dio2_bat_tn) && !is.na(dio2_bat_ce)) {
-  cat(sprintf("  [INFO] DIO2 in BAT: TN = %.2f, CE = %.2f (cold-responsive marker).\n",
-              dio2_bat_tn, dio2_bat_ce))
+  cat("   -> Data looks PROBLEMATIC: <50%% of expected patterns confirmed.\n")
+  cat("   -> Consider re-running Salmon or checking sample identity.\n")
 }
 cat("\n")
-
-## Save marker table
-write.csv(marker_wide, file.path(results_dir, "QC_marker_gene_table.csv"), row.names = FALSE)
-cat("Saved: results/QC_marker_gene_table.csv\n\n")
 
 ## ---- 8) Helpers -------------------------------------------------------------
 
@@ -506,37 +612,88 @@ ggsave(file.path(results_dir, "CLDN1_with_noise_floor.png"), p_cldn1_annotated,
        width = 5.5, height = 5, dpi = 300)
 cat("Saved: results/CLDN1_with_noise_floor.png\n")
 
-## ---- 13) VISUALIZATION 4: Marker gene heatmap (log10 scale) ----------------
-## Shows all marker genes in one figure. Good for the QC overview.
+## ---- 13) VISUALIZATION 4: Full marker heatmap (35 genes, 7 categories) -----
+## This is the centerpiece QC figure. Rows grouped by category.
+
+## Define row order: genes grouped by category
+category_order <- c("BAT identity", "WAT identity", "Cold-responsive",
+                     "Pan-adipocyte", "Thermogenesis", "Housekeeping",
+                     "Tight junction")
+
+gene_order <- marker_tpm %>%
+  mutate(Category = factor(Category, levels = category_order)) %>%
+  arrange(Category) %>%
+  pull(Symbol)
 
 heat_df <- marker_tpm %>%
-  select(Symbol, all_of(sample_names)) %>%
-  pivot_longer(-Symbol, names_to = "Sample", values_to = "TPM") %>%
+  select(Symbol, Category, all_of(sample_names)) %>%
+  pivot_longer(cols = all_of(sample_names), names_to = "Sample", values_to = "TPM") %>%
   mutate(
     log10TPM1 = log10(TPM + 1),
-    Symbol = factor(Symbol, levels = rev(c("UCP1", "CIDEA", "DIO2", "ADIPOQ", "LEP", "OSBPL7", "CLDN1"))),
-    Sample = factor(Sample, levels = c("WAT_TN", "WAT_CE", "BAT_TN", "BAT_CE"))
+    Symbol = factor(Symbol, levels = rev(gene_order)),
+    Sample = factor(Sample, levels = c("WAT_TN", "WAT_CE", "BAT_TN", "BAT_CE")),
+    ## Smart label: show 0 for zero, integer for >=10, 1 decimal for >=1, 2 decimal otherwise
+    label = case_when(
+      is.na(TPM) ~ "NA",
+      TPM == 0   ~ "0",
+      TPM >= 100 ~ sprintf("%.0f", TPM),
+      TPM >= 10  ~ sprintf("%.1f", TPM),
+      TPM >= 1   ~ sprintf("%.1f", TPM),
+      TPM >= 0.1 ~ sprintf("%.2f", TPM),
+      TRUE       ~ sprintf("%.3f", TPM)
+    )
   )
+
+## Build category separator positions for horizontal lines
+cat_breaks <- marker_tpm %>%
+  mutate(Category = factor(Category, levels = category_order)) %>%
+  arrange(Category) %>%
+  mutate(row_num = row_number()) %>%
+  group_by(Category) %>%
+  summarise(ymax = max(row_num), .groups = "drop")
+
+## Convert to positions between gene rows (reversed because ggplot y is bottom-up)
+n_genes <- nrow(marker_tpm)
+hline_positions <- cat_breaks$ymax[-nrow(cat_breaks)] + 0.5
+
+## Category label positions (midpoint of each group)
+cat_labels <- marker_tpm %>%
+  mutate(Category = factor(Category, levels = category_order)) %>%
+  arrange(Category) %>%
+  mutate(row_num = row_number()) %>%
+  group_by(Category) %>%
+  summarise(mid = mean(row_num), .groups = "drop") %>%
+  mutate(mid_rev = n_genes + 1 - mid)
 
 p_heat <- ggplot(heat_df, aes(x = Sample, y = Symbol, fill = log10TPM1)) +
   geom_tile(color = "white", linewidth = 0.5) +
-  geom_text(aes(label = sprintf("%.2f", TPM)), size = 3) +
-  scale_fill_gradient(low = "white", high = "#B2182B",
-                      name = "log10(TPM+1)") +
-  theme_minimal(base_size = 13) +
+  geom_text(aes(label = label), size = 2.6) +
+  scale_fill_gradient(low = "#F7F7F7", high = "#B2182B",
+                      name = "log10(TPM+1)",
+                      na.value = "grey80") +
+  ## Category separator lines
+  geom_hline(yintercept = n_genes + 1 - hline_positions, linewidth = 0.6, color = "grey30") +
+  ## Category labels on the right
+  annotate("text", x = 4.7, y = cat_labels$mid_rev,
+           label = cat_labels$Category,
+           size = 2.8, fontface = "bold", hjust = 0, color = "grey30") +
+  scale_x_discrete(position = "top") +
+  coord_cartesian(clip = "off", xlim = c(0.5, 4.5)) +
+  theme_minimal(base_size = 12) +
   theme(
-    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-    axis.text.y = element_text(face = "bold"),
-    panel.grid = element_blank()
+    axis.text.x.top = element_text(face = "bold", size = 11),
+    axis.text.y = element_text(face = "bold", size = 9),
+    panel.grid = element_blank(),
+    plot.margin = margin(5, 100, 5, 5)   # extra right margin for labels
   ) +
   labs(
-    title = "Marker gene heatmap (TPM values shown in cells)",
-    subtitle = "E-MTAB-4031  |  n = 1 per group",
+    title = "Marker gene heatmap (35 genes, 7 categories)",
+    subtitle = "E-MTAB-4031  |  n = 1 per group  |  TPM values in cells",
     x = NULL, y = NULL
   )
 
 ggsave(file.path(results_dir, "marker_gene_heatmap.png"), p_heat,
-       width = 7, height = 5, dpi = 300)
+       width = 8.5, height = 12, dpi = 300)
 cat("Saved: results/marker_gene_heatmap.png\n")
 
 ## ---- 14) Descriptive fold-change tables + bar chart -------------------------
