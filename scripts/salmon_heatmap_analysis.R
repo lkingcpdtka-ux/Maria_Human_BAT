@@ -31,7 +31,7 @@ suppressPackageStartupMessages({
 
 ## ---- Configuration ---------------------------------------------------------
 ## Point this to wherever your 4 Salmon gene quant .tabular files live
-DATA_DIR <- "data/salmon_quant"
+DATA_DIR <- "FASTQ"
 
 RESULTS_DIR <- "results"
 dir.create(RESULTS_DIR, showWarnings = FALSE, recursive = TRUE)
