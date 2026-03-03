@@ -6,7 +6,8 @@
 ## Fixes vs original script:
 ##   1. FPKM uses EffectiveLength (not Length) — matches how
 ##      Cuffdiff computes FPKM internally
-##   2. Blue-white-RED palette (paper used red, not pink)
+##   2. Blue-white-magenta palette matching MeV's actual rendering
+##      (paper caption says "red" but the figure is pink/magenta)
 ##   3. Added CD36 + LPL to FA panel (paper highlights these)
 ##   4. Expanded claudin family (CLDN1–15 + TJ scaffolds)
 ##   5. Trimmed marker panel to essentials
@@ -162,12 +163,14 @@ zscore_row <- function(x) {
 }
 
 ## ---- 6. Paper-style heatmap builder ----------------------------------------
-## Blue-white-RED, z-scored log2(FPKM+1), clipped [-2,2]
-## Matches: "z-scored and visualized as a heat-map representation
-##           in the blue-white-red scheme" from paper methods
+## Blue-white-MAGENTA, z-scored log2(FPKM+1), clipped [-1,1]
+## Paper caption says "blue-white-red" but MeV renders as magenta/pink.
+## Paper legend clearly shows z-score range -1.0 to 1.0.
 
 make_paper_heatmap <- function(gene_table, fpkm_matrix, title, filename,
-                               width = 6, height = NULL) {
+                               width = 6, height = NULL,
+                               z_limits = c(-1, 1),
+                               preserve_order = FALSE) {
 
   panel <- gene_table %>%
     inner_join(fpkm_matrix, by = "GeneID") %>%
@@ -193,14 +196,18 @@ make_paper_heatmap <- function(gene_table, fpkm_matrix, title, filename,
     Sample   = rep(sample_order, nrow(panel)),
     z        = as.vector(t(zmat))
   ) %>%
-    mutate(z_clip = pmax(-2, pmin(2, z)))
+    mutate(z_clip = pmax(z_limits[1], pmin(z_limits[2], z)))
 
-  ## Gene order: by category, then alphabetical within category
-  cat_levels <- unique(gene_table$Category)
-  gene_levels <- panel %>%
-    mutate(Category = factor(Category, levels = cat_levels)) %>%
-    arrange(Category, Symbol) %>%
-    pull(Symbol)
+  ## Gene order: preserve input order if requested, otherwise sort by category
+  if (preserve_order) {
+    gene_levels <- panel$Symbol
+  } else {
+    cat_levels <- unique(gene_table$Category)
+    gene_levels <- panel %>%
+      mutate(Category = factor(Category, levels = cat_levels)) %>%
+      arrange(Category, Symbol) %>%
+      pull(Symbol)
+  }
 
   panel_long <- panel_long %>%
     mutate(
@@ -213,9 +220,9 @@ make_paper_heatmap <- function(gene_table, fpkm_matrix, title, filename,
   p <- ggplot(panel_long, aes(x = Sample, y = Symbol, fill = z_clip)) +
     geom_tile(color = "black", linewidth = 0.4) +
     scale_fill_gradient2(
-      ## Paper palette: blue–white–RED (not pink)
-      low = "#2166AC", mid = "white", high = "#B2182B",
-      midpoint = 0, limits = c(-2, 2),
+      ## MeV's "blue-white-red" actually renders as magenta/pink
+      low = "#2166AC", mid = "white", high = "#C51B7D",
+      midpoint = 0, limits = z_limits,
       oob = scales::squish,
       name = "z-score"
     ) +
@@ -230,7 +237,8 @@ make_paper_heatmap <- function(gene_table, fpkm_matrix, title, filename,
       legend.position = "right"
     ) +
     labs(title = title,
-         subtitle = "z-scored log2(FPKM+1), clipped [-2, 2]")
+         subtitle = sprintf("z-scored log2(FPKM+1), clipped [%g, %g]",
+                            z_limits[1], z_limits[2]))
 
   ggsave(file.path(RESULTS_DIR, filename), p,
          width = width, height = height, dpi = 300)
@@ -240,30 +248,36 @@ make_paper_heatmap <- function(gene_table, fpkm_matrix, title, filename,
 
 ## ---- 7. Gene panels --------------------------------------------------------
 
-## 7a. Paper FA / lipid metabolism panel (Figure 3-style)
-##     + CD36 and LPL which the paper specifically highlights
-fa_genes <- tribble(
+## 7a. Paper FA / lipid metabolism panel — EXACT order from the figure
+##     Top-to-bottom as shown in the paper's heatmap
+fa_genes_paper <- tribble(
   ~Symbol,      ~GeneID,            ~Category,
-  "HMGCS2",     "ENSG00000134240",  "FA oxidation",
-  "ACADVL",     "ENSG00000072778",  "FA oxidation",
-  "ECHS1",      "ENSG00000127884",  "FA oxidation",
-  "HADHB",      "ENSG00000138029",  "FA oxidation",
-  "CPT1B",      "ENSG00000205560",  "FA oxidation",
-  "ACADM",      "ENSG00000117054",  "FA oxidation",
-  "ACAA2",      "ENSG00000167315",  "FA oxidation",
-  "ECI1",       "ENSG00000167969",  "FA oxidation",
-  "DECR1",      "ENSG00000104325",  "FA oxidation",
-  "SLC25A20",   "ENSG00000178537",  "Carnitine shuttle",
-  "CD36",       "ENSG00000135218",  "FA uptake",
-  "LPL",        "ENSG00000175445",  "FA uptake",
-  "BDH1",       "ENSG00000161267",  "Ketogenesis",
-  "DLD",        "ENSG00000091140",  "TCA / metabolism",
-  "GK",         "ENSG00000198814",  "Glycerol metabolism",
-  "PPARA",      "ENSG00000186951",  "Transcription factor",
-  "ACLY",       "ENSG00000131473",  "Lipogenesis",
-  "AGPAT3",     "ENSG00000160216",  "Lipid synthesis",
-  "DGAT1",      "ENSG00000185000",  "Lipid synthesis",
-  "DGAT2",      "ENSG00000062282",  "Lipid synthesis"
+  "HMGCS2",     "ENSG00000134240",  "FA / lipid metabolism",
+  "ACADVL",     "ENSG00000072778",  "FA / lipid metabolism",
+  "ECHS1",      "ENSG00000127884",  "FA / lipid metabolism",
+  "DGAT1",      "ENSG00000185000",  "FA / lipid metabolism",
+  "DGAT2",      "ENSG00000062282",  "FA / lipid metabolism",
+  "SLC25A20",   "ENSG00000178537",  "FA / lipid metabolism",
+  "HADHB",      "ENSG00000138029",  "FA / lipid metabolism",
+  "ECI1",       "ENSG00000167969",  "FA / lipid metabolism",
+  "CPT1B",      "ENSG00000205560",  "FA / lipid metabolism",
+  "AGPAT3",     "ENSG00000160216",  "FA / lipid metabolism",
+  "PPARA",      "ENSG00000186951",  "FA / lipid metabolism",
+  "ACLY",       "ENSG00000131473",  "FA / lipid metabolism",
+  "DECR1",      "ENSG00000104325",  "FA / lipid metabolism",
+  "GK",         "ENSG00000198814",  "FA / lipid metabolism",
+  "ACADM",      "ENSG00000117054",  "FA / lipid metabolism",
+  "BDH1",       "ENSG00000161267",  "FA / lipid metabolism",
+  "DLD",        "ENSG00000091140",  "FA / lipid metabolism",
+  "ACAA2",      "ENSG00000167315",  "FA / lipid metabolism"
+)
+
+## 7a-extra. CD36 + LPL — mentioned in the paper text as cold-induced
+##           but not in the heatmap figure; kept separate
+fa_genes_extra <- tribble(
+  ~Symbol,  ~GeneID,            ~Category,
+  "CD36",   "ENSG00000135218",  "FA uptake (paper text)",
+  "LPL",    "ENSG00000175445",  "FA uptake (paper text)"
 )
 
 ## 7b. Core identity markers (trimmed — just the essentials)
@@ -312,10 +326,20 @@ claudin_genes <- tribble(
 ## ---- 8. Generate heatmaps --------------------------------------------------
 cat("\n--- Generating heatmaps ---\n")
 
+## Paper-exact: 18 genes in the paper's row order, [-1,1] clipping
 p_fa <- make_paper_heatmap(
-  fa_genes, fpkm_wide,
-  "FA / Lipid Metabolism (paper-style)",
-  "heatmap_FA_metabolism.png", width = 6
+  fa_genes_paper, fpkm_wide,
+  "FA / Lipid Metabolism (paper figure replication)",
+  "heatmap_FA_metabolism.png", width = 6,
+  preserve_order = TRUE
+)
+
+## CD36 + LPL extra (not in the figure but discussed in text)
+p_fa_extra <- make_paper_heatmap(
+  bind_rows(fa_genes_paper, fa_genes_extra), fpkm_wide,
+  "FA / Lipid Metabolism + CD36/LPL",
+  "heatmap_FA_metabolism_extended.png", width = 6,
+  preserve_order = TRUE
 )
 
 p_id <- make_paper_heatmap(
@@ -453,7 +477,7 @@ ggsave(file.path(RESULTS_DIR, "positive_controls.png"), p_ctrl,
 cat("Saved: positive_controls.png\n")
 
 ## ---- 13. Descriptive fold-change table for FA panel -------------------------
-fa_fc <- fa_genes %>%
+fa_fc <- bind_rows(fa_genes_paper, fa_genes_extra) %>%
   inner_join(fpkm_wide, by = "GeneID") %>%
   filter(if_any(all_of(sample_order), ~ .x > 0)) %>%
   mutate(
@@ -475,8 +499,9 @@ cat("  Matrices:\n")
 cat("    TPM_matrix.csv\n")
 cat("    FPKM_matrix.csv\n")
 cat("\n")
-cat("  Heatmaps (blue-white-red, z-scored log2(FPKM+1)):\n")
-cat("    heatmap_FA_metabolism.png          <- paper Figure 3 style\n")
+cat("  Heatmaps (blue-white-magenta, z-scored log2(FPKM+1)):\n")
+cat("    heatmap_FA_metabolism.png          <- paper figure replication\n")
+cat("    heatmap_FA_metabolism_extended.png <- + CD36/LPL from paper text\n")
 cat("    heatmap_identity_markers.png       <- BAT/WAT/adipocyte markers\n")
 cat("    heatmap_claudin_family.png         <- all claudins scanned\n")
 cat("    heatmap_identity_and_claudins.png  <- combined\n")
