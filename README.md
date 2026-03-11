@@ -102,3 +102,85 @@ Manual sample map columns:
 
 - Study: https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-4031
 - Paper: https://www.cell.com/cell-metabolism/fulltext/S1550-4131(16)30185-1
+
+---
+
+# Part 2: MOF Het vs gWAT KD Comparison (GSE162653)
+
+Compare the MOF heterozygous (Mof+/-) visceral WAT bulk RNA-seq data from
+Pessoa Rodrigues et al. (Nat Commun 2021) to your male gWAT adipocyte
+knockdown dataset.
+
+**Paper:** Histone H4 lysine 16 acetylation controls central carbon metabolism
+and diet-induced obesity in mice
+- DOI: 10.1038/s41467-021-26277-w
+- GEO: GSE162653
+
+## Pipeline Overview
+
+Three-step Python pipeline:
+
+1. **Download** (`01_download_mof_data.py`) - Fetch data from GEO/Nature
+2. **QC** (`02_qc_mof_data.py`) - Quality control + DESeq2 DE analysis
+3. **Compare** (`03_compare_mof_vs_gwat.py`) - Cross-dataset comparison
+
+## Install Python dependencies
+
+```bash
+pip install -r requirements_python.txt
+```
+
+## Step 1: Download MOF het data
+
+```bash
+python3 scripts/01_download_mof_data.py --out-dir data/GSE162653
+```
+
+If automatic download fails (network restrictions), manually download:
+- GEO counts: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE162653
+- Supplementary Data 3 (DEG table): https://www.nature.com/articles/s41467-021-26277-w
+
+Place files in `data/GSE162653/`.
+
+## Step 2: QC the MOF het data
+
+```bash
+python3 scripts/02_qc_mof_data.py \
+  --data-dir data/GSE162653 \
+  --out-dir results/mof_qc
+```
+
+Outputs:
+- Library size, gene detection, PCA, correlation plots
+- DESeq2 differential expression (Mof+/- vs Mof+/+ for each diet)
+- MA plots, volcano plots, top DEG heatmaps
+- Filtered/normalized count matrices
+
+## Step 3: Compare MOF het to your gWAT KD data
+
+```bash
+python3 scripts/03_compare_mof_vs_gwat.py \
+  --mof-degs results/mof_qc/deseq2_Mofplusminus_vs_Mofplusplus_SD.csv \
+  --gwat-degs <path_to_your_gwat_degs.csv> \
+  --out-dir results/comparison
+```
+
+Your gWAT DEG file should be a CSV/TSV/XLSX with columns mappable to:
+`gene` (or as row index), `log2FoldChange` (or `logFC`), `padj` (or `FDR`).
+
+Outputs:
+- Venn diagram of overlapping DEGs
+- Fold-change scatter and rank-rank correlation plots
+- Running enrichment analysis
+- Gene lists for pathway tools (Enrichr, g:Profiler, DAVID)
+- Full comparison summary table
+
+## Testing with synthetic data
+
+```bash
+python3 scripts/generate_test_data.py
+python3 scripts/02_qc_mof_data.py
+python3 scripts/03_compare_mof_vs_gwat.py \
+  --mof-degs results/mof_qc/deseq2_Mofplusminus_vs_Mofplusplus.csv \
+  --gwat-degs data/gwat_kd/gwat_male_degs.csv
+```

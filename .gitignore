@@ -1,0 +1,13 @@
+# Data files (download separately)
+data/
+results/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+
+# OS
+.DS_Store
+Thumbs.db
