@@ -1,6 +1,7 @@
 optparse
 readr
 dplyr
+purrr
 tidyr
 stringr
 ggplot2
